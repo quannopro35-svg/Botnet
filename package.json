@@ -1,6 +1,6 @@
 {
   "name": "botnet-worker",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Botnet Worker for DDoS Attacks",
   "main": "worker.js",
   "scripts": {
