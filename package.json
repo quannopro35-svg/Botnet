@@ -1,0 +1,19 @@
+{
+  "name": "botnet-worker",
+  "version": "1.0.0",
+  "description": "Botnet Worker for DDoS Attacks",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js",
+    "worker": "node worker.js"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.7.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "keywords": ["botnet", "ddos", "worker", "attacker"],
+  "author": "QUÂN HACKER",
+  "license": "MIT"
+}
