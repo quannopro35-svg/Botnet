@@ -1,7 +1,7 @@
 {
   "name": "botnet-worker",
-  "version": "4.0.0",
-  "description": "Botnet Worker - ATTACK SIÊU MẠNH",
+  "version": "1.74",
+  "description": "Botnet Worker - v1.74",
   "main": "worker.js",
   "scripts": {
     "start": "node worker.js"
