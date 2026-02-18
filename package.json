@@ -1,14 +1,16 @@
 {
   "name": "botnet-worker",
   "version": "1.74",
-  "description": "Botnet Worker - v1.74",
+  "description": "Botnet Worker dựa trên v1.74",
   "main": "worker.js",
   "scripts": {
     "start": "node worker.js"
   },
   "dependencies": {
     "socket.io-client": "^4.7.2",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "axios": "^1.6.2",
+    "https-proxy-agent": "^7.0.2"
   },
   "engines": {
     "node": ">=14.0.0"
